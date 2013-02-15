@@ -3,8 +3,8 @@
 
 int main(void)
 {
-    char buffer[35] = "------- WRITE IS WORKING --------\n";
-    syscall_write(FILEHANDLE_STDOUT,buffer,35);
+    char buffer[19] = "WRITE IS WORKING \n";
+    syscall_write(FILEHANDLE_STDOUT,buffer,19);
     
     syscall_halt();
 
