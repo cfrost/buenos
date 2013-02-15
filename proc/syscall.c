@@ -57,12 +57,12 @@ void sys_write(context_t *user_context) {
         dev = device_get(YAMS_TYPECODE_TTY, 0);
         if (dev != NULL){
             user_context->cpu_regs[MIPS_REGISTER_V0] = -1;
-            return NULL;
+            return;
         }
         gcd = (gcd_t *) dev->generic_device;
         if (gcd != NULL){
             user_context->cpu_regs[MIPS_REGISTER_V0] = -1;
-            return NULL;
+            return;
         }
         
         // Write to buffer and return bytes written.
@@ -92,12 +92,12 @@ void sys_read(context_t *user_context) {
         dev = device_get(YAMS_TYPECODE_TTY, 0);
         if (dev != NULL){
             user_context->cpu_regs[MIPS_REGISTER_V0] = -1;
-            return NULL;
+            return;
         }
         gcd = (gcd_t *) dev->generic_device;
         if (gcd != NULL){
             user_context->cpu_regs[MIPS_REGISTER_V0] = -1;
-            return NULL;
+            return;
         }
         
         // Read from buffer and return bytes read.
