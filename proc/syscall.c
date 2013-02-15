@@ -39,6 +39,66 @@
 #include "kernel/panic.h"
 #include "lib/libc.h"
 #include "kernel/assert.h"
+#include "drivers/device.h"
+#include "drivers/gcd.h"
+
+int sys_write(context_t *user_context) {
+    /* Getting parameters from registers */
+    int fhandler = (int) user_context->cpu_regs[MIPS_REGISTER_A1];
+    char *buffer = (char *) user_context->cpu_regs[MIPS_REGISTER_A2];
+    int len      = (int) user_context->cpu_regs[MIPS_REGISTER_A3];
+
+    if ((fhandler == FILEHANDLE_STDOUT) 
+            || (fhandler == FILEHANDLE_STDERR)) {
+        device_t *dev;
+        gcd_t *gcd;
+        
+        // dev and gcd initialization and testing 
+        dev = device_get(YAMS_TYPECODE_TTY, 0);
+        KERNEL_ASSERT(dev != NULL);
+        gcd = (gcd_t *) dev->generic_device;
+        KERNEL_ASSERT(gcd != NULL);
+        
+        // Write to buffer and return bytes written.
+        user_context->cpu_regs[MIPS_REGISTER_V0] = gcd->write(gcd, buffer, len);
+    } else {
+        kprintf("Not reading from STDIN");
+        user_context->cpu_regs[MIPS_REGISTER_V0] = -1;
+    }
+
+}
+
+/* Function for syscall_read: Return number bytes actually read,
+ * only reading from STDIN else return error.
+ */
+void sys_read(context_t *user_context) {
+    /* Getting parameters from registers */
+    int fhandler = (int) user_context->cpu_regs[MIPS_REGISTER_A1];
+    char *buffer = (char *) user_context->cpu_regs[MIPS_REGISTER_A2];
+    int len      = (int) user_context->cpu_regs[MIPS_REGISTER_A3];
+
+    if (fhandler == FILEHANDLE_STDIN) {
+        device_t *dev;
+        gcd_t *gcd;
+        int buf_len;
+
+        // dev and gcd initialization and testing 
+        dev = device_get(YAMS_TYPECODE_TTY, 0);
+        KERNEL_ASSERT(dev != NULL);
+        gcd = (gcd_t *) dev->generic_device;
+        KERNEL_ASSERT(gcd != NULL);
+
+        // Read from buffer and return bytes read.
+        buf_len = gcd->read(gcd, buffer, len);
+
+        // Set last byte to EOF 
+        buffer[buf_len] = "\0";
+        user_context->cpu_regs[MIPS_REGISTER_V0] = buf_len;
+    } else {
+        kprintf("Not reading from STDIN");
+        user_context->cpu_regs[MIPS_REGISTER_V0] = -1;
+    }
+}
 
 /**
  * Handle system calls. Interrupts are enabled when this function is
@@ -47,8 +107,7 @@
  * @param user_context The userland context (CPU registers as they
  * where when system call instruction was called in userland)
  */
-void syscall_handle(context_t *user_context)
-{
+void syscall_handle(context_t *user_context) {
     /* When a syscall is executed in userland, register a0 contains
      * the number of the syscall. Registers a1, a2 and a3 contain the
      * arguments of the syscall. The userland code expects that after
@@ -58,12 +117,18 @@ void syscall_handle(context_t *user_context)
      * returning from this function the userland context will be
      * restored from user_context.
      */
-    switch(user_context->cpu_regs[MIPS_REGISTER_A0]) {
-    case SYSCALL_HALT:
-        halt_kernel();
-        break;
-    default: 
-        KERNEL_PANIC("Unhandled system call\n");
+    switch (user_context->cpu_regs[MIPS_REGISTER_A0]) {
+        case SYSCALL_HALT:
+            halt_kernel();
+            break;
+        case SYSCALL_READ:
+            sys_read(*user_context);
+            break;
+        case SYSCALL_WRITE:
+            sys_write(*user_context);
+            break;
+        default:
+            KERNEL_PANIC("Unhandled system call\n");
     }
 
     /* Move to next instruction after system call */
