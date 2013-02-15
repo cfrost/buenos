@@ -49,7 +49,7 @@ void sys_write(context_t *user_context) {
     int len      = (int) user_context->cpu_regs[MIPS_REGISTER_A3];
 
     if ((fhandler == FILEHANDLE_STDOUT) 
-            || (fhandler == FILEHANDLE_STDERR) && len > 0 ) {
+            || (fhandler == FILEHANDLE_STDERR)) {
         device_t *dev;
         gcd_t *gcd;
         
