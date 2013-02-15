@@ -42,7 +42,7 @@
 #include "drivers/device.h"
 #include "drivers/gcd.h"
 
-int sys_write(context_t *user_context) {
+void sys_write(context_t *user_context) {
     /* Getting parameters from registers */
     int fhandler = (int) user_context->cpu_regs[MIPS_REGISTER_A1];
     char *buffer = (char *) user_context->cpu_regs[MIPS_REGISTER_A2];
@@ -92,7 +92,7 @@ void sys_read(context_t *user_context) {
         buf_len = gcd->read(gcd, buffer, len);
 
         // Set last byte to EOF 
-        buffer[buf_len] = "\0";
+        buffer[buf_len] = '\0';
         user_context->cpu_regs[MIPS_REGISTER_V0] = buf_len;
     } else {
         kprintf("Not reading from STDIN");
