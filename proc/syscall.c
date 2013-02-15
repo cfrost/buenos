@@ -49,21 +49,15 @@ void sys_write(context_t *user_context) {
     int len      = (int) user_context->cpu_regs[MIPS_REGISTER_A3];
 
     if ((fhandler == FILEHANDLE_STDOUT) 
-            || (fhandler == FILEHANDLE_STDERR) || len > 0 ) {
+            || (fhandler == FILEHANDLE_STDERR) && len > 0 ) {
         device_t *dev;
         gcd_t *gcd;
         
         // dev and gcd initialization and testing 
         dev = device_get(YAMS_TYPECODE_TTY, 0);
-        if (dev != NULL){
-            user_context->cpu_regs[MIPS_REGISTER_V0] = -1;
-            return;
-        }
+        KERNEL_ASSERT(dev != NULL);
         gcd = (gcd_t *) dev->generic_device;
-        if (gcd != NULL){
-            user_context->cpu_regs[MIPS_REGISTER_V0] = -1;
-            return;
-        }
+        KERNEL_ASSERT(gcd != NULL);
         
         // Write to buffer and return bytes written.
         user_context->cpu_regs[MIPS_REGISTER_V0] = gcd->write(gcd, buffer, len);
@@ -83,22 +77,16 @@ void sys_read(context_t *user_context) {
     char *buffer = (char *) user_context->cpu_regs[MIPS_REGISTER_A2];
     int len      = (int) user_context->cpu_regs[MIPS_REGISTER_A3];
     
-    if (fhandler == FILEHANDLE_STDIN || len > 0) {
+    if (fhandler == FILEHANDLE_STDIN) {
         device_t *dev;
         gcd_t *gcd;
         int buf_len;
 
         // dev and gcd initialization and testing 
         dev = device_get(YAMS_TYPECODE_TTY, 0);
-        if (dev != NULL){
-            user_context->cpu_regs[MIPS_REGISTER_V0] = -1;
-            return;
-        }
+        KERNEL_ASSERT(dev != NULL);
         gcd = (gcd_t *) dev->generic_device;
-        if (gcd != NULL){
-            user_context->cpu_regs[MIPS_REGISTER_V0] = -1;
-            return;
-        }
+        KERNEL_ASSERT(gcd != NULL);
         
         // Read from buffer and return bytes read.
         buf_len = gcd->read(gcd, buffer, len);
