@@ -136,12 +136,12 @@ void syscall_handle(context_t *user_context) {
         case SYSCALL_READ:
             ret_val = sys_read(user_context);
             user_context->cpu_regs[MIPS_REGISTER_V0] = ret_val;
-            kprintf("V0 = %d\n",ret_val);
+            //kprintf("V0 = %d\n",ret_val);
             break;
         case SYSCALL_WRITE:
             ret_val = sys_write(user_context);
             user_context->cpu_regs[MIPS_REGISTER_V0] = ret_val;
-            kprintf("V0 = %d\n",ret_val);
+            //kprintf("V0 = %d\n",ret_val);
             break;
         default:
             KERNEL_PANIC("Unhandled system call\n");
