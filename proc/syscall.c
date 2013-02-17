@@ -41,29 +41,35 @@
 #include "kernel/assert.h"
 #include "drivers/device.h"
 #include "drivers/gcd.h"
+#include "drivers/yams.h"
 
-void sys_write(context_t *user_context) {
+int sys_write(context_t *user_context) {
     /* Getting parameters from registers */
     int fhandler = (int) user_context->cpu_regs[MIPS_REGISTER_A1];
     char *buffer = (char *) user_context->cpu_regs[MIPS_REGISTER_A2];
     int len      = (int) user_context->cpu_regs[MIPS_REGISTER_A3];
-
+    
+    if (len < 0){
+        kprintf("Given length is less then 0");
+        return -1;
+    }
+        
     if ((fhandler == FILEHANDLE_STDOUT) 
             || (fhandler == FILEHANDLE_STDERR)) {
         device_t *dev;
         gcd_t *gcd;
-        
         // dev and gcd initialization and testing 
         dev = device_get(YAMS_TYPECODE_TTY, 0);
-        KERNEL_ASSERT(dev != NULL);
+        if (dev == NULL) return -1;
+        
         gcd = (gcd_t *) dev->generic_device;
-        KERNEL_ASSERT(gcd != NULL);
+        if (gcd == NULL) return -1;
         
         // Write to buffer and return bytes written.
-        user_context->cpu_regs[MIPS_REGISTER_V0] = gcd->write(gcd, buffer, len);
+        return gcd->write(gcd, buffer, len);
     } else {
-        kprintf("Not reading from STDIN");
-        user_context->cpu_regs[MIPS_REGISTER_V0] = -1;
+        kprintf("Not writing to STDOUT");
+        return -1;
     }
 
 }
@@ -71,12 +77,17 @@ void sys_write(context_t *user_context) {
 /* Function for syscall_read: Return number bytes actually read,
  * only reading from STDIN else return error.
  */
-void sys_read(context_t *user_context) {
+int sys_read(context_t *user_context) {
     /* Getting parameters from registers */
     int fhandler = (int) user_context->cpu_regs[MIPS_REGISTER_A1];
     char *buffer = (char *) user_context->cpu_regs[MIPS_REGISTER_A2];
     int len      = (int) user_context->cpu_regs[MIPS_REGISTER_A3];
     
+    if (len < 0){
+        kprintf("Given length is less then 0");
+        return -1;
+    }
+        
     if (fhandler == FILEHANDLE_STDIN) {
         device_t *dev;
         gcd_t *gcd;
@@ -84,19 +95,19 @@ void sys_read(context_t *user_context) {
 
         // dev and gcd initialization and testing 
         dev = device_get(YAMS_TYPECODE_TTY, 0);
-        KERNEL_ASSERT(dev != NULL);
+        if (dev == NULL) return -1;
         gcd = (gcd_t *) dev->generic_device;
-        KERNEL_ASSERT(gcd != NULL);
+        if (gcd == NULL) return -1;
         
         // Read from buffer and return bytes read.
         buf_len = gcd->read(gcd, buffer, len);
 
         // Set last byte to EOF 
         buffer[buf_len] = '\0';
-        user_context->cpu_regs[MIPS_REGISTER_V0] = buf_len;
+        return buf_len;
     } else {
         kprintf("ERROR Not reading from STDIN");
-        user_context->cpu_regs[MIPS_REGISTER_V0] = -1;
+        return -1;
     }
 }
 
@@ -117,15 +128,20 @@ void syscall_handle(context_t *user_context) {
      * returning from this function the userland context will be
      * restored from user_context.
      */
+    int ret_val;
     switch (user_context->cpu_regs[MIPS_REGISTER_A0]) {
         case SYSCALL_HALT:
             halt_kernel();
             break;
         case SYSCALL_READ:
-            sys_read(user_context);
+            ret_val = sys_read(user_context);
+            user_context->cpu_regs[MIPS_REGISTER_V0] = ret_val;
+            kprintf("V0 = %d\n",ret_val);
             break;
         case SYSCALL_WRITE:
-            sys_write(user_context);
+            ret_val = sys_write(user_context);
+            user_context->cpu_regs[MIPS_REGISTER_V0] = ret_val;
+            kprintf("V0 = %d\n",ret_val);
             break;
         default:
             KERNEL_PANIC("Unhandled system call\n");
