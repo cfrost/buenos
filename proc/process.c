@@ -111,8 +111,6 @@ void process_start(const process_id_t pid) {
 
     int i;
 
-    //HUSK process running
-
     interrupt_status_t intr_status;
 
     my_entry = thread_get_current_thread_entry();
@@ -127,6 +125,7 @@ void process_start(const process_id_t pid) {
 
     intr_status = _interrupt_disable();
     my_entry->pagetable = pagetable;
+	// Sets new threads process id to new spawned pid.
 	my_entry->process_id = pid;
     _interrupt_set_state(intr_status);
 
@@ -229,13 +228,11 @@ void process_start(const process_id_t pid) {
 
 void process_init() {
     process_id_t pid;
-	/*
-        interrupt_status_t intr_status;
-        intr_status = _interrupt_disable();
-        _interrupt_set_state(intr_status);
-     */
+	
+	// Ensures that no spinlock is present 
     spinlock_reset(&process_slock);
 
+	// Initialize/reset all process in the process table
     for ( pid = 0; pid < PROCESS_MAX_PROCESSES; pid++) {
         process_reset(&process_table[pid]);
     }
@@ -246,15 +243,17 @@ process_id_t process_spawn(const char *executable) {
 	DEBUG( "debug_process", "Spawn entered\n"); 
     process_id_t pid;
 
+	/* Disable interrupts and acquiere spinlock before handeling changes 
+	 * in process table */
     interrupt_status_t intr_status = _interrupt_disable();
-
-    //Spinlock 
     spinlock_acquire(&process_slock);
+	
+	// Find free process in table, return pid or -1 if table is full
     pid = process_find_free();
 	
 	DEBUG( "debug_process", "Free pid : %d\n", pid); 
 
-    // Table full ?
+    // Check if table is full
     if (pid < 0) {
         spinlock_release(&process_slock);
         _interrupt_set_state(intr_status);
@@ -264,19 +263,16 @@ process_id_t process_spawn(const char *executable) {
     // Set current process state to running.
     process_table[pid].state = PROCESS_RUNNING;
     stringcopy(process_table[pid].name, executable, PROCESS_MAX_NAMESIZE);
+	process_table[pid].parent_id = process_get_current_process();	
 	
-	DEBUG( "debug_process", "Before parent\n"); 
-    process_table[pid].parent_id = process_get_current_process();
-	DEBUG( "debug_process", "After parent\n"); 
-
     //Spinlock release 
     spinlock_release(&process_slock);
     _interrupt_set_state(intr_status);
 
-    //call 
+    // Create thread that starts process_start withe PID as argument and run it
     TID_t newthread = thread_create((void (*)(uint32_t)) &process_start, pid);
 	DEBUG( "debug_process", "Thread id : %d\n", newthread); 
-
+	
     thread_run(newthread);
 	DEBUG( "debug_process", "Thread running\n"); 
     return pid;
@@ -284,20 +280,29 @@ process_id_t process_spawn(const char *executable) {
 
 /* Stop the process and the thread it runs in. Sets the return value as well */
 void process_finish(int retval) {
-    // Sleepqueues, spinlock, interupts 
-
-    // DO STUFF
     thread_table_t *thr = thread_get_current_thread_entry();
     process_id_t current = process_get_current_process();
-
-    vm_destroy_pagetable(thr->pagetable);
-    thr->pagetable = NULL;
-
+	
+	
+	/* Disable interrupts and acquiere spinlock before handeling changes 
+	 * in process table */ 
+	interrupt_status_t intr_status = _interrupt_disable();
+    spinlock_acquire(&process_slock);
+	
     // Store retval in current pcb and set ZOMBIE
     process_table[current].retval = retval;
     process_table[current].state = PROCESS_ZOMBIE;
-    // Process done and no need for a sleep queue.
+	
+	// Necessary code provided by the assignment description
+	vm_destroy_pagetable(thr->pagetable);
+    thr->pagetable = NULL;
+	
+	// Process done and no need for a sleep queue.
     sleepq_wake_all(&process_table[current]);
+	
+	// Release spinlock and enable interrupts
+	spinlock_release(&process_slock);
+	_interrupt_set_state(intr_status);
 
     thread_finish();
 
@@ -307,57 +312,37 @@ void process_finish(int retval) {
 int process_join(process_id_t pid) {
     int retval;
 
+	
+	/* Check if argument pid is in between 0 to max processes and check 
+	 * if current process is pids parrent. If such, return -1 / ERROR */
     if ((pid < 0 || pid > PROCESS_MAX_PROCESSES) ||
             process_table[pid].parent_id != process_get_current_process()) {
         return -1;
     }
 
+	// Implemented according to BUENOS roadmaps psudocode on sleepqueue at 5.2
+	
+	/* Disable interrupts and acquiere spinlock before handeling changes 
+	 * in process table */ 
     interrupt_status_t intr_status = _interrupt_disable();
     spinlock_acquire(&process_slock);
-    //vent på child kalder finish
+    // Waiting for pid to call finish
     while (process_table[pid].state != PROCESS_ZOMBIE) {
+		// add 
         sleepq_add(&process_table[pid]);
         spinlock_release(&process_slock);
         thread_switch();
         spinlock_acquire(&process_slock);
     }
-    //DO STUFF
+    // Storing return value and resets the process pid 
     retval = process_table[pid].retval;
     process_reset(&process_table[pid]);
-    //STUFF DONE
 
-    // Release slock and enable interrupts
+    // Release spinlock and enable interrupts
     spinlock_release(&process_slock);
     _interrupt_set_state(intr_status);
 
     return retval;
-
-    /*  Process/thread wishing to go to sleep
-    1 Disable interrupts
-    2 Acquire the resource spinlock
-    3 While we want to sleep:
-    4 sleepq_add(resource)
-    5 Release the resource spinlock
-    6 thread_switch()
-    7 Acquire the resource spinlock
-    8 EndWhile
-    9 Do your duty with the resource
-    10 Release the resource spinlock
-    11 Restore the interrupt mask
-     */
-    /* Process/thread wishing to wake up another thread
-    1 Disable interrupts
-    2 Acquire the resource spinlock
-    3 Do your duty with the resource
-    4 If wishing to wake up something
-    5 sleepq_wake(resource) or sleepq_wake_all(resource)
-    6 EndIf
-    7 Release the resource spinlock
-    8 Restore the interrupt mask
-     */
 }
-
-
-
 
 /** @} */

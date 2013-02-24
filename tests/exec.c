@@ -5,6 +5,7 @@
 #include "tests/lib.h"
 
 static const char prog[] = "[arkimedes]hw"; /* The program to start. */
+static const char prog2[] = "[arkimedes]calc"; /* The program to start. */
 
 int main(void)
 {
@@ -12,6 +13,12 @@ int main(void)
   int ret;
   printf("Starting program %s\n", prog);
   child = syscall_exec(prog);
+  printf("Now joining child %d\n", child);
+  ret = (char)syscall_join(child);
+  printf("Child joined with status: %d\n", ret);
+  
+  printf("Starting program %s\n", prog2);
+  child = syscall_exec(prog2);
   printf("Now joining child %d\n", child);
   ret = (char)syscall_join(child);
   printf("Child joined with status: %d\n", ret);
