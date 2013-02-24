@@ -37,9 +37,11 @@
 #ifndef BUENOS_PROC_PROCESS
 #define BUENOS_PROC_PROCESS
 
+#include "kernel/cswitch.h"
+
 typedef int process_id_t;
 
-void process_start(const char *executable);
+void process_start(const process_id_t pid);
 
 #define USERLAND_STACK_TOP 0x7fffeffc
 
@@ -48,9 +50,23 @@ void process_start(const char *executable);
 
 #define PROCESS_MAX_PROCESSES 32
 
+#define PROCESS_MAX_NAMESIZE 256
+
+typedef enum {
+    PROCESS_FREE,
+    PROCESS_RUNNING,
+    PROCESS_ZOMBIE,
+    PROCESS_DEAD
+} process_state_t;
+
 typedef struct {
-  /* STUB: Put something here. */
-  int dummy; /* Remove this. */
+    // Name of the respective executable 
+    char name[PROCESS_MAX_NAMESIZE];
+    process_id_t id;
+    process_id_t parent_id;
+    process_state_t state;
+    int retval;
+
 } process_control_block_t;
 
 /* Initialize the process table.  This must be called during kernel

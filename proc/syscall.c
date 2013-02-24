@@ -42,29 +42,30 @@
 #include "drivers/device.h"
 #include "drivers/gcd.h"
 #include "drivers/yams.h"
+#include "proc/process.h"
 
 int sys_write(context_t *user_context) {
     /* Getting parameters from registers */
     int fhandler = (int) user_context->cpu_regs[MIPS_REGISTER_A1];
     char *buffer = (char *) user_context->cpu_regs[MIPS_REGISTER_A2];
-    int len      = (int) user_context->cpu_regs[MIPS_REGISTER_A3];
-    
-    if (len < 0){
+    int len = (int) user_context->cpu_regs[MIPS_REGISTER_A3];
+
+    if (len < 0) {
         kprintf("Given length is less then 0");
         return -1;
     }
-        
-    if ((fhandler == FILEHANDLE_STDOUT) 
+
+    if ((fhandler == FILEHANDLE_STDOUT)
             || (fhandler == FILEHANDLE_STDERR)) {
         device_t *dev;
         gcd_t *gcd;
         // dev and gcd initialization and testing 
         dev = device_get(YAMS_TYPECODE_TTY, 0);
         if (dev == NULL) return -1;
-        
+
         gcd = (gcd_t *) dev->generic_device;
         if (gcd == NULL) return -1;
-        
+
         // Write to buffer and return bytes written.
         return gcd->write(gcd, buffer, len);
     } else {
@@ -81,13 +82,13 @@ int sys_read(context_t *user_context) {
     /* Getting parameters from registers */
     int fhandler = (int) user_context->cpu_regs[MIPS_REGISTER_A1];
     char *buffer = (char *) user_context->cpu_regs[MIPS_REGISTER_A2];
-    int len      = (int) user_context->cpu_regs[MIPS_REGISTER_A3];
-    
-    if (len < 0){
+    int len = (int) user_context->cpu_regs[MIPS_REGISTER_A3];
+
+    if (len < 0) {
         kprintf("Given length is less then 0");
         return -1;
     }
-        
+
     if (fhandler == FILEHANDLE_STDIN) {
         device_t *dev;
         gcd_t *gcd;
@@ -98,7 +99,7 @@ int sys_read(context_t *user_context) {
         if (dev == NULL) return -1;
         gcd = (gcd_t *) dev->generic_device;
         if (gcd == NULL) return -1;
-        
+
         // Read from buffer and return bytes read.
         buf_len = gcd->read(gcd, buffer, len);
 
@@ -109,6 +110,23 @@ int sys_read(context_t *user_context) {
         kprintf("ERROR Not reading from STDIN");
         return -1;
     }
+}
+
+void sys_exit(context_t *user_context) {
+    int retval = (int) user_context->cpu_regs[MIPS_REGISTER_A1];
+
+    if (retval < 0) {
+        kprintf("ERROR\n");
+        return;
+    } else {
+        process_finish(retval);
+    }
+}
+
+int sys_join(context_t *user_context) {
+    int pid = (int) user_context->cpu_regs[MIPS_REGISTER_A1];
+
+	return process_join(pid);
 }
 
 /**
@@ -142,6 +160,17 @@ void syscall_handle(context_t *user_context) {
             ret_val = sys_write(user_context);
             user_context->cpu_regs[MIPS_REGISTER_V0] = ret_val;
             //kprintf("V0 = %d\n",ret_val);
+            break;
+        case SYSCALL_EXEC:
+            ret_val = process_spawn((char *) user_context->cpu_regs[MIPS_REGISTER_A1]);
+            user_context->cpu_regs[MIPS_REGISTER_V0] = ret_val;
+            break;
+        case SYSCALL_EXIT:
+            sys_exit(user_context);
+            break;
+        case SYSCALL_JOIN:
+            ret_val = sys_join(user_context);
+            user_context->cpu_regs[MIPS_REGISTER_V0] = ret_val;
             break;
         default:
             KERNEL_PANIC("Unhandled system call\n");

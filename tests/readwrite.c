@@ -1,7 +1,5 @@
 #include "tests/lib.h"
 #include "proc/syscall.h"
-#include "lib/debug.h"
-#include "lib/libc.h"
 
 int main(void) {
     char c;

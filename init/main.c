@@ -132,10 +132,11 @@ void init_startup_thread(uint32_t arg)
 
     kprintf("Starting initial program '%s'\n", bootargs_get("initprog"));
 
-    process_start(bootargs_get("initprog"));
+    // TODO change to spawn instead of start
+    process_spawn(bootargs_get("initprog"));
 
     /* The current process_start() should never return. */
-    KERNEL_PANIC("Run out of initprog.\n");
+//    KERNEL_PANIC("Run out of initprog.\n");
 }
 
 /* Whether other processors than 0 may continue in SMP mode.
@@ -213,10 +214,14 @@ void init(void)
 
     kwrite("Initializing virtual memory\n");
     vm_init();
+	
+	kwrite("Initializing process table\n");
+	process_init();
 
     kprintf("Creating initialization thread\n");
     startup_thread = thread_create(&init_startup_thread, 0);
     thread_run(startup_thread);
+    //init_startup_thread(0);
 
     kprintf("Starting threading system and SMP\n");
 
