@@ -257,6 +257,7 @@ process_id_t process_spawn(const char *executable) {
     if (pid < 0) {
         spinlock_release(&process_slock);
         _interrupt_set_state(intr_status);
+		KERNEL_ASSERT(pid >= 0);
         return pid;
     }
 
@@ -282,7 +283,8 @@ process_id_t process_spawn(const char *executable) {
 void process_finish(int retval) {
     thread_table_t *thr = thread_get_current_thread_entry();
     process_id_t current = process_get_current_process();
-	
+
+	// Implemented according to BUENOS roadmaps psudocode on sleepqueue at 5.2	
 	
 	/* Disable interrupts and acquiere spinlock before handeling changes 
 	 * in process table */ 

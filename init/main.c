@@ -221,7 +221,6 @@ void init(void)
     kprintf("Creating initialization thread\n");
     startup_thread = thread_create(&init_startup_thread, 0);
     thread_run(startup_thread);
-    //init_startup_thread(0);
 
     kprintf("Starting threading system and SMP\n");
 
