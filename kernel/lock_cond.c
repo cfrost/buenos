@@ -22,14 +22,11 @@ int lock_reset(lock_t *lock) {
  * ineffcient. In your solution, you should use the sleep queue to let 
  * kernel threads wait.*/
 void lock_acquire(lock_t *lock) {
-    /* mark the lock as owned by the current thread; if some other thread 
-     * already owns the lock then first wait until the lock is free. Lock 
-     * typically includes a queue to keep track of multiple waiting threads. */
 
-    // sleep queues
-
+    // Disable interrupts and acquire spinlock
     interrupt_status_t intr_status = _interrupt_disable();
     spinlock_acquire(&(lock->spinlock));
+    // While lock is lock'ed sleep thread.
     while (lock->lock != 0) {
         sleepq_add(lock);
         spinlock_release(&(lock->spinlock));
@@ -72,7 +69,7 @@ void condition_wait(cond_t *cond, lock_t *lock) {
      * thread wakes up again, reacquire lock before returning. */
     lock_release(lock);
     sleepq_add(cond);
-    // Sleepq does not sleep thread thererfore thread_switch
+    // Sleepq does not sleep thread therefore thread_switch
     thread_switch();
     lock_acquire(lock);
 }
