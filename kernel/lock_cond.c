@@ -1,7 +1,8 @@
 #include "lib/libc.h"
-#include "lock_cond.h"
-#include "spinlock.h"
-#include "sleepq.h"
+#include "kernel/lock_cond.h"
+#include "kernel/spinlock.h"
+#include "kernel/sleepq.h"
+#include "kernel/interrupt.h"
 
 /* Initialize an already allocated lock t structure such that it can be acquired 
  * and released afterwards. The function should return 0 on success and a 
@@ -56,7 +57,7 @@ void lock_release(lock_t *lock) {
     sleepq_wake(lock);
 
     // Release spinlock and enable interrupts
-    spinlock_release(lock->spinlock);
+    spinlock_release(&lock->spinlock);
     _interrupt_set_state(intr_status);
 }
 
@@ -83,12 +84,14 @@ void condition_signal(cond_t *cond, lock_t *lock) {
     /* after signal, signaling thread keeps lock, waking thread goes on the 
      * queue waiting for the lock.*/
     //lock_acquire(lock);
+    lock = lock;
     sleepq_wake(cond);
 
 }
 
 void condition_broadcast(cond_t *cond, lock_t *lock) {
     /*  same as signal, except wake up all waiting threads.*/
+    lock = lock;
     sleepq_wake_all(cond);
 
 }
