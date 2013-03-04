@@ -263,10 +263,12 @@ process_id_t process_spawn(const char *executable) {
 
     // Set current process state to running.
     process_table[pid].state = PROCESS_RUNNING;
+	// disable spinlock
+
     stringcopy(process_table[pid].name, executable, PROCESS_MAX_NAMESIZE);
 	process_table[pid].parent_id = process_get_current_process();	
 	
-    //Spinlock release 
+    //Spinlock release . DONT!
     spinlock_release(&process_slock);
     _interrupt_set_state(intr_status);
 
