@@ -5,7 +5,7 @@
  *       Leena Salmela, Teemu Takanen, Aleksi Virtanen.
  *
  * Redistribution and use in source and binary forms, with or without
- * modification, are ppermitted provided that the following conditions
+ * modification, are permitted provided that the following conditions
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
@@ -44,49 +44,57 @@
 #include "drivers/yams.h"
 #include "vm/vm.h"
 #include "vm/pagepool.h"
-#include "lib/libc.h"
 #include "kernel/sleepq.h"
-#include "lib/debug.h"
+
 
 /** @name Process startup
  *
- * This module contains facilities for managing userland process.
+ * This module contains a function to start a userland process.
  */
 
-process_control_block_t process_table[PROCESS_MAX_PROCESSES];
+process_table_t process_table[PROCESS_MAX_PROCESSES];
 
-spinlock_t process_slock;
+spinlock_t process_table_slock;
 
-/* Bestem om locks skal sættes her eller når funktionen kaldes*/
-void process_reset(process_control_block_t *pcb) {
-    pcb->parent_id = -1;
-    pcb->state = PROCESS_FREE;
-    pcb->name[0] = '\0';
+void process_reset(process_id_t pid)
+{
+    process_table[pid].state         = PROCESS_FREE;
+    process_table[pid].executable[0] = 0;
+    process_table[pid].retval        = 0;
+    process_table[pid].cFiles        = 0;
 }
 
-/* Find free PID in process_table, if full return -1*/
-process_id_t process_find_free() {
-    process_id_t pid;
-    for (pid = 0; pid < PROCESS_MAX_PROCESSES; ++pid) {
-        if (process_table[pid].state != PROCESS_FREE)
-            continue;
-        else
-            return pid;
+/* Initialize process table and spinlock */
+void process_init()
+{
+    int i;
+    spinlock_reset(&process_table_slock);
+    for (i = 0; i <= PROCESS_MAX_PROCESSES; ++i)
+        process_reset(i);
+}
+
+/* Find a free slot in the process table. Returns PROCESS_MAX_PROCESSES
+ * if the table is full. */
+process_id_t alloc_process_id()
+{
+    int i;
+    interrupt_status_t intr_status;
+
+    intr_status = _interrupt_disable();
+    spinlock_acquire(&process_table_slock);
+    for (i = 0; i <= PROCESS_MAX_PROCESSES; ++i)
+    {
+        if (process_table[i].state == PROCESS_FREE)
+        {
+            process_table[i].state = PROCESS_RUNNING;
+            break;
+        }
     }
-    return -1;
+    spinlock_release(&process_table_slock);
+    _interrupt_set_state(intr_status);
+    return i;
 }
 
-process_id_t process_get_current_process(void) {
-    return thread_get_current_thread_entry()->process_id;
-}
-
-process_control_block_t *process_get_current_process_entry(void) {
-    return &process_table[process_get_current_process()];
-}
-
-process_control_block_t *process_get_process_entry(process_id_t pid) {
-    return &process_table[pid];
-}
 
 /**
  * Starts one userland process. The thread calling this function will
@@ -100,7 +108,8 @@ process_control_block_t *process_get_process_entry(process_id_t pid) {
  * @executable The name of the executable to be run in the userland
  * process
  */
-void process_start(const process_id_t pid) {
+void process_start(process_id_t pid)
+{
     thread_table_t *my_entry;
     pagetable_t *pagetable;
     uint32_t phys_page;
@@ -108,12 +117,15 @@ void process_start(const process_id_t pid) {
     uint32_t stack_bottom;
     elf_info_t elf;
     openfile_t file;
+    char *executable;
 
     int i;
 
     interrupt_status_t intr_status;
 
     my_entry = thread_get_current_thread_entry();
+    my_entry->process_id = pid;
+    executable = process_table[pid].executable;
 
     /* If the pagetable of this thread is not NULL, we are trying to
        run a userland process for a second time in the same thread.
@@ -125,12 +137,14 @@ void process_start(const process_id_t pid) {
 
     intr_status = _interrupt_disable();
     my_entry->pagetable = pagetable;
-	// Sets new threads process id to new spawned pid.
-	my_entry->process_id = pid;
+
+    /* Update TLB to allow access to the virtual addresses of the
+       segments. */
+    _tlb_set_asid(thread_get_current_thread());
+
     _interrupt_set_state(intr_status);
 
-    // changed
-    file = vfs_open((char *) process_table[pid].name);
+    file = vfs_open((char *)executable);
     /* Make sure the file existed and was a valid ELF file */
     KERNEL_ASSERT(file >= 0);
     KERNEL_ASSERT(elf_parse_header(&elf, file));
@@ -145,28 +159,11 @@ void process_start(const process_id_t pid) {
             <= _tlb_get_maxindex() + 1);
 
     /* Allocate and map stack */
-    for (i = 0; i < CONFIG_USERLAND_STACK_SIZE; i++) {
+    for(i = 0; i < CONFIG_USERLAND_STACK_SIZE; i++) {
         phys_page = pagepool_get_phys_page();
         KERNEL_ASSERT(phys_page != 0);
         vm_map(my_entry->pagetable, phys_page,
                 (USERLAND_STACK_TOP & PAGE_SIZE_MASK) - i*PAGE_SIZE, 1);
-    }
-
-    /* Allocate and map pages for the segments. We assume that
-       segments begin at page boundary. (The linker script in tests
-       directory creates this kind of segments) */
-    for (i = 0; i < (int) elf.ro_pages; i++) {
-        phys_page = pagepool_get_phys_page();
-        KERNEL_ASSERT(phys_page != 0);
-        vm_map(my_entry->pagetable, phys_page,
-                elf.ro_vaddr + i*PAGE_SIZE, 1);
-    }
-
-    for (i = 0; i < (int) elf.rw_pages; i++) {
-        phys_page = pagepool_get_phys_page();
-        KERNEL_ASSERT(phys_page != 0);
-        vm_map(my_entry->pagetable, phys_page,
-                elf.rw_vaddr + i*PAGE_SIZE, 1);
     }
 
     /* Put the mapped pages into TLB. Here we again assume that the
@@ -178,13 +175,41 @@ void process_start(const process_id_t pid) {
 
     /* Now we may use the virtual addresses of the segments. */
 
+    /* Allocate and map pages for the segments. We assume that
+       segments begin at page boundary. (The linker script in tests
+       directory creates this kind of segments) */
+    for(i = 0; i < (int)elf.ro_pages; i++) {
+        phys_page = pagepool_get_phys_page();
+        KERNEL_ASSERT(phys_page != 0);
+        vm_map(my_entry->pagetable, phys_page,
+                elf.ro_vaddr + i*PAGE_SIZE, 1);
+    }
+
+    for(i = 0; i < (int)elf.rw_pages; i++) {
+        phys_page = pagepool_get_phys_page();
+        KERNEL_ASSERT(phys_page != 0);
+        vm_map(my_entry->pagetable, phys_page,
+                elf.rw_vaddr + i*PAGE_SIZE, 1);
+    }
+
+    /* Initialize heap pointer */
+    uint32_t heap_end = elf.rw_vaddr+elf.rw_size;
+    process_table[pid].heap_end = heap_end;
+    if (heap_end % PAGE_SIZE == 0) {
+        /* In the unlikely event that the heap should start on the 
+           first address of a page we must allocate that page. */
+        uint32_t phys_page = pagepool_get_phys_page();
+        KERNEL_ASSERT(phys_page != 0);
+        vm_map(pagetable, phys_page, heap_end, 1);
+    }
+
     /* Zero the pages. */
-    memoryset((void *) elf.ro_vaddr, 0, elf.ro_pages * PAGE_SIZE);
-    memoryset((void *) elf.rw_vaddr, 0, elf.rw_pages * PAGE_SIZE);
+    memoryset((void *)elf.ro_vaddr, 0, elf.ro_pages*PAGE_SIZE);
+    memoryset((void *)elf.rw_vaddr, 0, elf.rw_pages*PAGE_SIZE);
 
     stack_bottom = (USERLAND_STACK_TOP & PAGE_SIZE_MASK) -
-            (CONFIG_USERLAND_STACK_SIZE - 1) * PAGE_SIZE;
-    memoryset((void *) stack_bottom, 0, CONFIG_USERLAND_STACK_SIZE * PAGE_SIZE);
+        (CONFIG_USERLAND_STACK_SIZE-1)*PAGE_SIZE;
+    memoryset((void *)stack_bottom, 0, CONFIG_USERLAND_STACK_SIZE*PAGE_SIZE);
 
     /* Copy segments */
 
@@ -192,21 +217,21 @@ void process_start(const process_id_t pid) {
         /* Make sure that the segment is in proper place. */
         KERNEL_ASSERT(elf.ro_vaddr >= PAGE_SIZE);
         KERNEL_ASSERT(vfs_seek(file, elf.ro_location) == VFS_OK);
-        KERNEL_ASSERT(vfs_read(file, (void *) elf.ro_vaddr, elf.ro_size)
-                == (int) elf.ro_size);
+        KERNEL_ASSERT(vfs_read(file, (void *)elf.ro_vaddr, elf.ro_size)
+                == (int)elf.ro_size);
     }
 
     if (elf.rw_size > 0) {
         /* Make sure that the segment is in proper place. */
         KERNEL_ASSERT(elf.rw_vaddr >= PAGE_SIZE);
         KERNEL_ASSERT(vfs_seek(file, elf.rw_location) == VFS_OK);
-        KERNEL_ASSERT(vfs_read(file, (void *) elf.rw_vaddr, elf.rw_size)
-                == (int) elf.rw_size);
+        KERNEL_ASSERT(vfs_read(file, (void *)elf.rw_vaddr, elf.rw_size)
+                == (int)elf.rw_size);
     }
 
 
     /* Set the dirty bit to zero (read-only) on read-only pages. */
-    for (i = 0; i < (int) elf.ro_pages; i++) {
+    for(i = 0; i < (int)elf.ro_pages; i++) {
         vm_set_dirty(my_entry->pagetable, elf.ro_vaddr + i*PAGE_SIZE, 0);
     }
 
@@ -215,9 +240,10 @@ void process_start(const process_id_t pid) {
     tlb_fill(my_entry->pagetable);
     _interrupt_set_state(intr_status);
 
+
     /* Initialize the user context. (Status register is handled by
        thread_goto_userland) */
-    memoryset(&user_context, 0, sizeof (user_context));
+    memoryset(&user_context, 0, sizeof(user_context));
     user_context.cpu_regs[MIPS_REGISTER_SP] = USERLAND_STACK_TOP;
     user_context.pc = elf.entry_point;
 
@@ -226,127 +252,105 @@ void process_start(const process_id_t pid) {
     KERNEL_PANIC("thread_goto_userland failed.");
 }
 
-void process_init() {
-    process_id_t pid;
-	
-	// Ensures that no spinlock is present 
-    spinlock_reset(&process_slock);
+process_id_t process_spawn(const char *executable)
+{
+    TID_t thread;
+    process_id_t pid = alloc_process_id();
 
-	// Initialize/reset all process in the process table
-    for ( pid = 0; pid < PROCESS_MAX_PROCESSES; pid++) {
-        process_reset(&process_table[pid]);
-    }
-	DEBUG( "debug_process", "Init done\n"); 
-}
+    if (pid == PROCESS_MAX_PROCESSES)
+        return PROCESS_PTABLE_FULL;
 
-process_id_t process_spawn(const char *executable) {
-	DEBUG( "debug_process", "Spawn entered\n"); 
-    process_id_t pid;
+    /* Remember to copy the executable name for use in process_start */
+    stringcopy(process_table[pid].executable, executable, PROCESS_MAX_FILELENGTH);
+    process_table[pid].parent = process_get_current_process();
 
-	/* Disable interrupts and acquiere spinlock before handeling changes 
-	 * in process table */
-    interrupt_status_t intr_status = _interrupt_disable();
-    spinlock_acquire(&process_slock);
-	
-	// Find free process in table, return pid or -1 if table is full
-    pid = process_find_free();
-	
-	DEBUG( "debug_process", "Free pid : %d\n", pid); 
-
-    // Check if table is full
-    if (pid < 0) {
-        spinlock_release(&process_slock);
-        _interrupt_set_state(intr_status);
-		KERNEL_ASSERT(pid >= 0);
-        return pid;
-    }
-
-    // Set current process state to running.
-    process_table[pid].state = PROCESS_RUNNING;
-	// disable spinlock
-
-    stringcopy(process_table[pid].name, executable, PROCESS_MAX_NAMESIZE);
-	process_table[pid].parent_id = process_get_current_process();	
-	
-    //Spinlock release . DONT!
-    spinlock_release(&process_slock);
-    _interrupt_set_state(intr_status);
-
-    // Create thread that starts process_start withe PID as argument and run it
-    TID_t newthread = thread_create((void (*)(uint32_t)) &process_start, pid);
-	DEBUG( "debug_process", "Thread id : %d\n", newthread); 
-	
-    thread_run(newthread);
-	DEBUG( "debug_process", "Thread running\n"); 
+    thread = thread_create((void (*)(uint32_t))(&process_start), pid);
+    thread_run(thread);
     return pid;
 }
 
-/* Stop the process and the thread it runs in. Sets the return value as well */
-void process_finish(int retval) {
-    thread_table_t *thr = thread_get_current_thread_entry();
-    process_id_t current = process_get_current_process();
-
-	// Implemented according to BUENOS roadmaps psudocode on sleepqueue at 5.2	
-	
-	/* Disable interrupts and acquiere spinlock before handeling changes 
-	 * in process table */ 
-	interrupt_status_t intr_status = _interrupt_disable();
-    spinlock_acquire(&process_slock);
-	
-    // Store retval in current pcb and set ZOMBIE
-    process_table[current].retval = retval;
-    process_table[current].state = PROCESS_ZOMBIE;
-	
-	// Necessary code provided by the assignment description
-	vm_destroy_pagetable(thr->pagetable);
-    thr->pagetable = NULL;
-	
-	// Process done and no need for a sleep queue.
-    sleepq_wake_all(&process_table[current]);
-	
-	// Release spinlock and enable interrupts
-	spinlock_release(&process_slock);
-	_interrupt_set_state(intr_status);
-
-    thread_finish();
-
-    // if parrent : kill ?? kill all children??
+process_id_t process_get_current_process(void)
+{
+    return thread_get_current_thread_entry()->process_id;
 }
 
-int process_join(process_id_t pid) {
+process_table_t *process_get_current_process_entry(void)
+{
+    return &process_table[process_get_current_process()];
+}
+
+int process_join(process_id_t pid)
+{
     int retval;
+    interrupt_status_t intr_status;
 
-	
-	/* Check if argument pid is in between 0 to max processes and check 
-	 * if current process is pids parrent. If such, return -1 / ERROR */
-    if ((pid < 0 || pid > PROCESS_MAX_PROCESSES) ||
-            process_table[pid].parent_id != process_get_current_process()) {
-        return -1;
-    }
+    /* Only join with legal pids */
+    if (pid < 0 || pid >= PROCESS_MAX_PROCESSES ||
+            process_table[pid].parent != process_get_current_process())
+        return PROCESS_ILLEGAL_JOIN;
 
-	// Implemented according to BUENOS roadmaps psudocode on sleepqueue at 5.2
-	
-	/* Disable interrupts and acquiere spinlock before handeling changes 
-	 * in process table */ 
-    interrupt_status_t intr_status = _interrupt_disable();
-    spinlock_acquire(&process_slock);
-    // Waiting for pid to call finish
-    while (process_table[pid].state != PROCESS_ZOMBIE) {
-		// add 
+    intr_status = _interrupt_disable();
+    spinlock_acquire(&process_table_slock);
+
+    /* The thread could be zombie even though it wakes us (maybe). */
+    while (process_table[pid].state != PROCESS_ZOMBIE)
+    {
         sleepq_add(&process_table[pid]);
-        spinlock_release(&process_slock);
+        spinlock_release(&process_table_slock);
         thread_switch();
-        spinlock_acquire(&process_slock);
+        spinlock_acquire(&process_table_slock);
     }
-    // Storing return value and resets the process pid 
+
     retval = process_table[pid].retval;
-    process_reset(&process_table[pid]);
+    process_reset(pid);
 
-    // Release spinlock and enable interrupts
-    spinlock_release(&process_slock);
+    spinlock_release(&process_table_slock);
     _interrupt_set_state(intr_status);
-
     return retval;
+}
+
+void process_finish(int retval)
+{
+    interrupt_status_t intr_status;
+    process_id_t cur = process_get_current_process();
+    thread_table_t *thread = thread_get_current_thread_entry();
+
+    intr_status = _interrupt_disable();
+    spinlock_acquire(&process_table_slock);
+
+    process_table[cur].state  = PROCESS_ZOMBIE;
+    process_table[cur].retval = retval;
+
+    /* Remember to destroy the pagetable! */
+    vm_destroy_pagetable(thread->pagetable);
+    thread->pagetable = NULL;
+
+    sleepq_wake_all(&process_table[cur]);
+
+    spinlock_release(&process_table_slock);
+    _interrupt_set_state(intr_status);
+    thread_finish();
+}
+
+int process_add_file(openfile_t fd)
+{
+  fd = fd;
+  KERNEL_PANIC("Not implemented.");
+  return 0; /* Dummy */
+}
+
+int process_rem_file(openfile_t fd)
+{
+  fd = fd;
+  KERNEL_PANIC("Not implemented.");
+  return 0; /* Dummy */
+}
+
+int process_check_file(openfile_t fd)
+{
+  fd = fd;
+  KERNEL_PANIC("Not implemented.");
+  return 0; /* Dummy */
 }
 
 /** @} */

@@ -39,94 +39,55 @@
 #include "kernel/panic.h"
 #include "lib/libc.h"
 #include "kernel/assert.h"
+#include "proc/process.h"
 #include "drivers/device.h"
 #include "drivers/gcd.h"
-#include "drivers/yams.h"
-#include "proc/process.h"
+#include "fs/vfs.h"
 
-int sys_write(context_t *user_context) {
-    /* Getting parameters from registers */
-    int fhandler = (int) user_context->cpu_regs[MIPS_REGISTER_A1];
-    char *buffer = (char *) user_context->cpu_regs[MIPS_REGISTER_A2];
-    int len = (int) user_context->cpu_regs[MIPS_REGISTER_A3];
+void syscall_exit(int retval)
+{
+    process_finish(retval);
+}
 
-    if (len < 0) {
-        kprintf("Given length is less then 0");
-        return -1;
-    }
-
-    if ((fhandler == FILEHANDLE_STDOUT)
-            || (fhandler == FILEHANDLE_STDERR)) {
-        device_t *dev;
-        gcd_t *gcd;
-        // dev and gcd initialization and testing 
+int syscall_write(uint32_t fd, char *s, int len)
+{
+    gcd_t *gcd;
+    device_t *dev;
+    if (fd == FILEHANDLE_STDOUT || fd == FILEHANDLE_STDERR)
+    {
         dev = device_get(YAMS_TYPECODE_TTY, 0);
-        if (dev == NULL) return -1;
-
-        gcd = (gcd_t *) dev->generic_device;
-        if (gcd == NULL) return -1;
-
-        // Write to buffer and return bytes written.
-        return gcd->write(gcd, buffer, len);
+        gcd = (gcd_t *)dev->generic_device;
+        return gcd->write(gcd, s, len);
     } else {
-        kprintf("Not writing to STDOUT");
-        return -1;
+      KERNEL_PANIC("Write syscall not finished yet.");
+      return 0;
     }
-
 }
 
-/* Function for syscall_read: Return number bytes actually read,
- * only reading from STDIN else return error.
- */
-int sys_read(context_t *user_context) {
-    /* Getting parameters from registers */
-    int fhandler = (int) user_context->cpu_regs[MIPS_REGISTER_A1];
-    char *buffer = (char *) user_context->cpu_regs[MIPS_REGISTER_A2];
-    int len = (int) user_context->cpu_regs[MIPS_REGISTER_A3];
-
-    if (len < 0) {
-        kprintf("Given length is less then 0");
-        return -1;
-    }
-
-    if (fhandler == FILEHANDLE_STDIN) {
-        device_t *dev;
-        gcd_t *gcd;
-        int buf_len;
-
-        // dev and gcd initialization and testing 
+int syscall_read(uint32_t fd, char *s, int len)
+{
+    gcd_t *gcd;
+    device_t *dev;
+    if (fd == FILEHANDLE_STDIN)
+    {
         dev = device_get(YAMS_TYPECODE_TTY, 0);
-        if (dev == NULL) return -1;
-        gcd = (gcd_t *) dev->generic_device;
-        if (gcd == NULL) return -1;
-
-        // Read from buffer and return bytes read.
-        buf_len = gcd->read(gcd, buffer, len);
-
-        // Set last byte to EOF 
-        buffer[buf_len] = '\0';
-        return buf_len;
-    } else {
-        kprintf("ERROR Not reading from STDIN");
-        return -1;
+        gcd = (gcd_t *)dev->generic_device;
+        return gcd->read(gcd, s, len);
+    }
+    else {
+      KERNEL_PANIC("Read syscall not finished yet.");
+      return 0;
     }
 }
 
-void sys_exit(context_t *user_context) {
-    int retval = (int) user_context->cpu_regs[MIPS_REGISTER_A1];
-
-    if (retval < 0) {
-        kprintf("ERROR\n");
-        return;
-    } else {
-        process_finish(retval);
-    }
+int syscall_join(process_id_t pid)
+{
+    return process_join(pid);
 }
 
-int sys_join(context_t *user_context) {
-    int pid = (int) user_context->cpu_regs[MIPS_REGISTER_A1];
-
-	return process_join(pid);
+process_id_t syscall_exec(const char *filename)
+{
+    return process_spawn(filename);
 }
 
 /**
@@ -136,7 +97,11 @@ int sys_join(context_t *user_context) {
  * @param user_context The userland context (CPU registers as they
  * where when system call instruction was called in userland)
  */
-void syscall_handle(context_t *user_context) {
+void syscall_handle(context_t *user_context)
+{
+    int A1 = user_context->cpu_regs[MIPS_REGISTER_A1];
+    int A2 = user_context->cpu_regs[MIPS_REGISTER_A2];
+    int A3 = user_context->cpu_regs[MIPS_REGISTER_A3];
     /* When a syscall is executed in userland, register a0 contains
      * the number of the syscall. Registers a1, a2 and a3 contain the
      * arguments of the syscall. The userland code expects that after
@@ -146,31 +111,28 @@ void syscall_handle(context_t *user_context) {
      * returning from this function the userland context will be
      * restored from user_context.
      */
-    int ret_val;
-    switch (user_context->cpu_regs[MIPS_REGISTER_A0]) {
+    switch(user_context->cpu_regs[MIPS_REGISTER_A0]) {
         case SYSCALL_HALT:
             halt_kernel();
             break;
-        case SYSCALL_READ:
-            ret_val = sys_read(user_context);
-            user_context->cpu_regs[MIPS_REGISTER_V0] = ret_val;
-            //kprintf("V0 = %d\n",ret_val);
+        case SYSCALL_EXIT:
+            syscall_exit(A1);
             break;
         case SYSCALL_WRITE:
-            ret_val = sys_write(user_context);
-            user_context->cpu_regs[MIPS_REGISTER_V0] = ret_val;
-            //kprintf("V0 = %d\n",ret_val);
+            user_context->cpu_regs[MIPS_REGISTER_V0] =
+                syscall_write(A1, (char *)A2, A3);
             break;
-        case SYSCALL_EXEC:
-            ret_val = process_spawn((char *) user_context->cpu_regs[MIPS_REGISTER_A1]);
-            user_context->cpu_regs[MIPS_REGISTER_V0] = ret_val;
-            break;
-        case SYSCALL_EXIT:
-            sys_exit(user_context);
+        case SYSCALL_READ:
+            user_context->cpu_regs[MIPS_REGISTER_V0] =
+                syscall_read(A1, (char *)A2, A3);
             break;
         case SYSCALL_JOIN:
-            ret_val = sys_join(user_context);
-            user_context->cpu_regs[MIPS_REGISTER_V0] = ret_val;
+            user_context->cpu_regs[MIPS_REGISTER_V0] =
+                syscall_join(A1);
+            break;
+        case SYSCALL_EXEC:
+            user_context->cpu_regs[MIPS_REGISTER_V0] =
+                syscall_exec((char *)A1);
             break;
         default:
             KERNEL_PANIC("Unhandled system call\n");

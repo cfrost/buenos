@@ -37,43 +37,45 @@
 #ifndef BUENOS_PROC_PROCESS
 #define BUENOS_PROC_PROCESS
 
-#include "kernel/cswitch.h"
-
-typedef int process_id_t;
-
-void process_start(const process_id_t pid);
+#include "lib/types.h"
 
 #define USERLAND_STACK_TOP 0x7fffeffc
 
 #define PROCESS_PTABLE_FULL  -1
 #define PROCESS_ILLEGAL_JOIN -2
 
-#define PROCESS_MAX_PROCESSES 32
+#define PROCESS_MAX_FILELENGTH 256
+#define PROCESS_MAX_PROCESSES  128
+#define PROCESS_MAX_FILES      10
 
-#define PROCESS_MAX_NAMESIZE 256
+typedef int process_id_t;
 
 typedef enum {
     PROCESS_FREE,
     PROCESS_RUNNING,
-    PROCESS_ZOMBIE,
-    PROCESS_DEAD
+    PROCESS_ZOMBIE
 } process_state_t;
 
 typedef struct {
-    // Name of the respective executable 
-    char name[PROCESS_MAX_NAMESIZE];
-    process_id_t id;
-    process_id_t parent_id;
-    process_state_t state;
-    int retval;
-} process_control_block_t;
+  char executable[PROCESS_MAX_FILELENGTH];
+  process_state_t state;
+  int retval;
+  process_id_t parent;
 
-/* Initialize the process table.  This must be called during kernel
-   startup before any other process-related calls. */
+  uint32_t cFiles;
+  int files[PROCESS_MAX_FILES];
+
+  uint32_t heap_end;
+} process_table_t;
+
+/* Initialize the process table */
 void process_init();
 
 /* Run process in a new thread. Returns the PID of the new process. */
 process_id_t process_spawn(const char *executable);
+
+process_id_t process_get_current_process(void);
+process_table_t *process_get_current_process_entry(void);
 
 /* Stop the process and the thread it runs in. Sets the return value as well */
 void process_finish(int retval);
@@ -83,10 +85,15 @@ void process_finish(int retval);
  * Only works on child processes */
 int process_join(process_id_t pid);
 
-/* Return PID of current process. */
-process_id_t process_get_current_process(void);
+/* Add a file to the current process's file list. Returns negative value on
+ * error. */
+int process_add_file(int fd);
 
-/* Return PCB of current process. */
-process_control_block_t *process_get_current_process_entry(void);
+/* Remove a file from the current process's file list. Returns negative value
+ * on error. */
+int process_rem_file(int fd);
+
+/* Check if a file is in the current process's file list. Returns 0 if it is. */
+int process_check_file(int fd);
 
 #endif
