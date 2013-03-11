@@ -7,7 +7,7 @@ int main(void) {
     int ret;
     uint32_t child;
     char buffer[BUFFER_SIZE];
-    heap_init();
+    //heap_init();
     puts("Press c for create and q for kill \n");
     while (1) {
         readline(buffer, BUFFER_SIZE);

@@ -228,7 +228,7 @@ void init(void)
 
     /* Let other CPUs run */
     kernel_bootstrap_finished = 1;
-
+    
     _interrupt_clear_bootstrap();
     _interrupt_enable();
 

@@ -38,20 +38,83 @@
 #include "kernel/assert.h"
 #include "vm/tlb.h"
 #include "vm/pagetable.h"
+#include "kernel/thread.h"
+#include "vm/vm.h"
 
-void tlb_modified_exception(void)
-{
+// FROM vm.c
+#define ADDR_IS_ON_ODD_PAGE(addr)  ((addr) & 0x00001000)  
+
+// send terminate signal to process
+void tlb_modified_exception(void) {
+    tlb_exception_state_t tlb_es;
+    _tlb_get_exception_state(&tlb_es);
+    pagetable_t *current_pagetable;
+    current_pagetable = thread_get_current_thread_entry()->pagetable;
+    
+    if (current_pagetable == NULL) {
+        KERNEL_PANIC("Pagetable is non-existing");
+    }
+    
+    uint32_t i;
+    for (i = 0; i < current_pagetable->valid_count; i++) {
+        tlb_entry_t *entry = &current_pagetable->entries[i];
+        // find addr fra pagetable og put i tlb. 
+        if (entry->VPN2 == tlb_es.badvpn2) {
+            
+            /* Checks if address is odd( see vm.c)
+             * and thereafter checks validbit */
+            if (ADDR_IS_ON_ODD_PAGE(entry->VPN2)){
+                KERNEL_ASSERT(entry->D1);
+            } else {
+                KERNEL_ASSERT(entry->D0);
+            }
+            return;
+        }
+    }
     KERNEL_PANIC("Unhandled TLB modified exception");
 }
 
-void tlb_load_exception(void)
-{
-    KERNEL_PANIC("Unhandled TLB load exception");
+// common exception for store and load
+
+void tlb_common_exception(void) {
+    tlb_exception_state_t tlb_es;
+    _tlb_get_exception_state(&tlb_es);
+    pagetable_t *current_pagetable;
+    current_pagetable = thread_get_current_thread_entry()->pagetable;
+    if (current_pagetable == NULL) {
+        KERNEL_PANIC("Pagetable is non-existing");
+    }
+    uint32_t i;
+    for (i = 0; i < current_pagetable->valid_count; i++) {
+        tlb_entry_t *entry = &current_pagetable->entries[i];
+        // find addr fra pagetable og put i tlb. 
+        if (entry->VPN2 == tlb_es.badvpn2) {
+            
+            KERNEL_ASSERT(entry->VPN2 == tlb_es.badvaddr >> 13);
+
+            /* Checks if address is odd( see vm.c)
+             * and thereafter checks validbit */
+
+            if (ADDR_IS_ON_ODD_PAGE(tlb_es.badvaddr)){
+                KERNEL_ASSERT(entry->V1);
+            } else {
+                KERNEL_ASSERT(entry->V0);
+            }
+
+            // Inserting into a random entry of the tlb.
+            _tlb_write_random(&current_pagetable->entries[i]);
+            return;
+        }
+    }
+    KERNEL_PANIC("Invalid page: Not found in pagetable");
 }
 
-void tlb_store_exception(void)
-{
-    KERNEL_PANIC("Unhandled TLB store exception");
+void tlb_load_exception(void) {
+    tlb_common_exception();
+}
+
+void tlb_store_exception(void) {
+    tlb_common_exception();
 }
 
 /**
@@ -63,20 +126,21 @@ void tlb_store_exception(void)
  *
  */
 
-void tlb_fill(pagetable_t *pagetable)
-{
-    if(pagetable == NULL)
-	return;
+void tlb_fill(pagetable_t *pagetable) {
+    pagetable = pagetable;
+    //if (pagetable == NULL)
+      //  return;
 
     /* Check that the pagetable can fit into TLB. This is needed until
      we have proper VM system, because the whole pagetable must fit
      into TLB. */
-    KERNEL_ASSERT(pagetable->valid_count <= (_tlb_get_maxindex()+1));
+    //KERNEL_ASSERT(pagetable->valid_count <= (_tlb_get_maxindex() + 1));
 
-    _tlb_write(pagetable->entries, 0, pagetable->valid_count);
+  //  _tlb_write(pagetable->entries, 0, pagetable->valid_count);
 
     /* Set ASID field in Co-Processor 0 to match thread ID so that
        only entries with the ASID of the current thread will match in
        the TLB hardware. */
-    _tlb_set_asid(pagetable->ASID);
+//    _tlb_set_asid(pagetable->ASID);
+    
 }

@@ -683,18 +683,25 @@ typedef struct free_block {
 
 static const size_t MIN_ALLOC_SIZE = sizeof(free_block_t);
 
-free_block_t *free_list;
+// Initialize free_list instead of using heap_init
+free_block_t *free_list = NULL;
 
+// USELESS
+/*
 byte heap[HEAP_SIZE];
+*/
 
+// USELESS
 /* Initialise the heap - malloc et al won't work unless this is called
    first. */
+/*
 void heap_init()
 {
   free_list = (free_block_t*) heap;
   free_list->size = HEAP_SIZE;
   free_list->next = NULL;
 }
+*/
 
 
 /* Return a block of at least size bytes, or NULL if no such block 
@@ -737,7 +744,37 @@ void *malloc(size_t size) {
   }
 
   /* No heap space left. */
-  return NULL;
+  uint32_t heap_end = (uint32_t) syscall_memlimit((uint32_t *) NULL);
+  printf("before syscall: heap_end is %d \n",heap_end);
+  
+  heap_end = (uint32_t) syscall_memlimit((uint32_t*)heap_end + size + sizeof(size_t));
+  printf("after syscall: heap_end is %d \n",heap_end);
+  free_block_t *new_block = (free_block_t*)(heap_end);
+  new_block->size = size+sizeof(size_t);
+          
+ 
+  // iterrere igennem free_list og finde enden, derefter sætte new_block på.
+  free_block_t *cur_block;
+  free_block_t *prev_block;
+    for (cur_block = free_list, prev_block = NULL; 
+         ;
+         prev_block = cur_block, cur_block = cur_block->next) {
+      if( cur_block == NULL){
+          printf("Current block is NULL \n");
+          cur_block = new_block;
+          new_block->size = size+sizeof(size_t);
+          if (prev_block != NULL){
+              prev_block->next = cur_block;
+              printf("Previous block is not NULL \n");
+          }
+          break;
+      }
+  }
+  
+  return ((byte*)new_block)+sizeof(size_t);
+  
+  //return syscall_memlimit((uint32_t*)end + size + sizeof(size_t));
+  //return (int*) end;
 }
 
 /* Return the block pointed to by ptr to the free pool. */

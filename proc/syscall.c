@@ -43,51 +43,68 @@
 #include "drivers/device.h"
 #include "drivers/gcd.h"
 #include "fs/vfs.h"
+#include "vm/vm.h"
+#include "vm/pagepool.h"
 
-void syscall_exit(int retval)
-{
+void syscall_exit(int retval) {
     process_finish(retval);
 }
 
-int syscall_write(uint32_t fd, char *s, int len)
-{
+int syscall_write(uint32_t fd, char *s, int len) {
     gcd_t *gcd;
     device_t *dev;
-    if (fd == FILEHANDLE_STDOUT || fd == FILEHANDLE_STDERR)
-    {
+    if (fd == FILEHANDLE_STDOUT || fd == FILEHANDLE_STDERR) {
         dev = device_get(YAMS_TYPECODE_TTY, 0);
-        gcd = (gcd_t *)dev->generic_device;
+        gcd = (gcd_t *) dev->generic_device;
         return gcd->write(gcd, s, len);
     } else {
-      KERNEL_PANIC("Write syscall not finished yet.");
-      return 0;
+        KERNEL_PANIC("Write syscall not finished yet.");
+        return 0;
     }
 }
 
-int syscall_read(uint32_t fd, char *s, int len)
-{
+int syscall_read(uint32_t fd, char *s, int len) {
     gcd_t *gcd;
     device_t *dev;
-    if (fd == FILEHANDLE_STDIN)
-    {
+    if (fd == FILEHANDLE_STDIN) {
         dev = device_get(YAMS_TYPECODE_TTY, 0);
-        gcd = (gcd_t *)dev->generic_device;
+        gcd = (gcd_t *) dev->generic_device;
         return gcd->read(gcd, s, len);
-    }
-    else {
-      KERNEL_PANIC("Read syscall not finished yet.");
-      return 0;
+    } else {
+        KERNEL_PANIC("Read syscall not finished yet.");
+        return 0;
     }
 }
 
-int syscall_join(process_id_t pid)
-{
+int syscall_join(process_id_t pid) {
     return process_join(pid);
 }
 
-process_id_t syscall_exec(const char *filename)
-{
+process_id_t syscall_exec(const char *filename) {
     return process_spawn(filename);
+}
+
+//vm_map bed om mere hukommelse
+//vm_unmap anti/release more mem
+
+int syscall_memlimit(uint32_t heap_end) {
+    uint32_t current_end = process_get_current_process_entry()->heap_end;
+    // return current heap end
+    if (heap_end == (int) NULL) {
+        return current_end;
+    }
+    // free - vm_unmap not implementated
+    if (heap_end < current_end) {
+        return (int) NULL;
+    }
+
+    // fundet i process.c
+    uint32_t phys_page = pagepool_get_phys_page();
+    KERNEL_ASSERT(phys_page != 0);
+    vm_map(thread_get_current_thread_entry()->pagetable, phys_page, heap_end, 1);
+    process_get_current_process_entry()->heap_end = heap_end;
+    return heap_end;
+
 }
 
 /**
@@ -97,8 +114,7 @@ process_id_t syscall_exec(const char *filename)
  * @param user_context The userland context (CPU registers as they
  * where when system call instruction was called in userland)
  */
-void syscall_handle(context_t *user_context)
-{
+void syscall_handle(context_t *user_context) {
     int A1 = user_context->cpu_regs[MIPS_REGISTER_A1];
     int A2 = user_context->cpu_regs[MIPS_REGISTER_A2];
     int A3 = user_context->cpu_regs[MIPS_REGISTER_A3];
@@ -111,7 +127,7 @@ void syscall_handle(context_t *user_context)
      * returning from this function the userland context will be
      * restored from user_context.
      */
-    switch(user_context->cpu_regs[MIPS_REGISTER_A0]) {
+    switch (user_context->cpu_regs[MIPS_REGISTER_A0]) {
         case SYSCALL_HALT:
             halt_kernel();
             break;
@@ -120,19 +136,23 @@ void syscall_handle(context_t *user_context)
             break;
         case SYSCALL_WRITE:
             user_context->cpu_regs[MIPS_REGISTER_V0] =
-                syscall_write(A1, (char *)A2, A3);
+                    syscall_write(A1, (char *) A2, A3);
             break;
         case SYSCALL_READ:
             user_context->cpu_regs[MIPS_REGISTER_V0] =
-                syscall_read(A1, (char *)A2, A3);
+                    syscall_read(A1, (char *) A2, A3);
             break;
         case SYSCALL_JOIN:
             user_context->cpu_regs[MIPS_REGISTER_V0] =
-                syscall_join(A1);
+                    syscall_join(A1);
             break;
         case SYSCALL_EXEC:
             user_context->cpu_regs[MIPS_REGISTER_V0] =
-                syscall_exec((char *)A1);
+                    syscall_exec((char *) A1);
+            break;
+        case SYSCALL_MEMLIMIT:
+            user_context->cpu_regs[MIPS_REGISTER_V0] =
+                    syscall_memlimit((uint32_t) A1);
             break;
         default:
             KERNEL_PANIC("Unhandled system call\n");

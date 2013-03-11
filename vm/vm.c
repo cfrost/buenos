@@ -186,7 +186,7 @@ void vm_map(pagetable_t *pagetable,
     }
 
     /* Map the page on a new entry */
-
+    //kprintf("Jonh is valid");
     pagetable->entries[pagetable->valid_count].VPN2 = vaddr >> 13;
     pagetable->entries[pagetable->valid_count].ASID = pagetable->ASID;
 
