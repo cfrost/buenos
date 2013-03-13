@@ -61,6 +61,11 @@ void process_reset(process_id_t pid) {
     process_table[pid].executable[0] = 0;
     process_table[pid].retval = 0;
     process_table[pid].cFiles = 0;
+    // init of files table, -1(NULL) is free space in table 
+    int i;
+    for (i = 0; i < PROCESS_MAX_FILES; i++) {
+        process_table[pid].files[i] = -1;
+    }
 }
 
 /* Initialize process table and spinlock */
@@ -324,7 +329,8 @@ int process_add_file(openfile_t fd) {
     int i;
     
     for (i = 0; i < PROCESS_MAX_FILES; i++) {
-        if (process_table[cur].files[i] != NULL) {
+        // -1(NULL) is free space in table 
+        if (process_table[cur].files[i] != -1) {
             process_table[cur].files[i] = fd;
             return 0;
         }
@@ -339,7 +345,8 @@ int process_rem_file(openfile_t fd) {
     
     for (i = 0; i < PROCESS_MAX_FILES; i++) {
         if (process_table[cur].files[i] == fd) {
-            process_table[cur].files[i] = NULL;
+            // -1(NULL) is free space in table 
+            process_table[cur].files[i] = -1;
             return 0;
         }
     }
