@@ -58,8 +58,11 @@ int syscall_write(uint32_t fd, char *s, int len) {
         gcd = (gcd_t *) dev->generic_device;
         return gcd->write(gcd, s, len);
     } else {
-        KERNEL_PANIC("Write syscall not finished yet.");
-        return 0;
+        if (process_check_file(fd)) {
+            return vfs_write(fd, s, len);
+        } else {
+            return -1;
+        }
     }
 }
 
@@ -71,8 +74,11 @@ int syscall_read(uint32_t fd, char *s, int len) {
         gcd = (gcd_t *) dev->generic_device;
         return gcd->read(gcd, s, len);
     } else {
-        KERNEL_PANIC("Read syscall not finished yet.");
-        return 0;
+        if (process_check_file(fd)) {
+            return vfs_read(fd, s, len);
+        } else {
+            return -1;
+        }
     }
 }
 
@@ -98,13 +104,47 @@ int syscall_memlimit(uint32_t heap_end) {
         return (int) NULL;
     }
 
+    //check med stack_end
+
     // fundet i process.c
-    uint32_t phys_page = pagepool_get_phys_page();
-    KERNEL_ASSERT(phys_page != 0);
-    vm_map(thread_get_current_thread_entry()->pagetable, phys_page, heap_end, 1);
+    int i;
+    for (i = current_end; current_end <= heap_end; i++) {
+        uint32_t phys_page = pagepool_get_phys_page();
+        KERNEL_ASSERT(phys_page != 0);
+        pagetable_t pt = thread_get_current_thread_entry()->pagetable;
+        KERNEL_ASSERT(pt != NULL);
+        vm_map(pt, phys_page, i, 1);
+        //heap_end += pagesize;
+    }
     process_get_current_process_entry()->heap_end = heap_end;
     return heap_end;
 
+}
+
+openfile_t syscall_open(const char *filename) {
+    openfile_t fid = vfs_open(filename);
+    KERNEL_ASSERT(fid > 2 | fid < 0);
+    // process file table is full
+    if (process_add_file(fid) < 0) return -10;
+    return fid;
+}
+
+int syscall_close(openfile_t filehandle) {
+    process_rem_file(filehandle);
+    return vfs_close(filehandle);
+}
+
+int syscall_create(const char *pathname, int size) {
+    return vfs_create(pathname, size);
+}
+
+int syscall_delete(const char *pathname) {
+    return vfs_remove(pathname);
+}
+
+int syscall_seek(openfile_t filehandle, int offset) {
+    // Check offset is within boundries aka file size
+    return vfs_seek(filehandle, offset)
 }
 
 /**
@@ -154,6 +194,27 @@ void syscall_handle(context_t *user_context) {
             user_context->cpu_regs[MIPS_REGISTER_V0] =
                     syscall_memlimit((uint32_t) A1);
             break;
+        case SYSCALL_OPEN:
+            user_context->cpu_regs[MIPS_REGISTER_V0] =
+                    syscall_open((char *) A1);
+            break;
+        case SYSCALL_CLOSE:
+            user_context->cpu_regs[MIPS_REGISTER_V0] =
+                    syscall_close((openfile_t) A1);
+            break;
+        case SYSCALL_CREATE:
+            user_context->cpu_regs[MIPS_REGISTER_V0] =
+                    syscall_create((char *) A1, A2);
+            break;
+        case SYSCALL_DELETE:
+            user_context->cpu_regs[MIPS_REGISTER_V0] =
+                    syscall_delete((char *) A1);
+            break;
+        case SYSCALL_SEEK:
+            user_context->cpu_regs[MIPS_REGISTER_V0] =
+                    syscall_seek(A1, A2);
+            break;
+
         default:
             KERNEL_PANIC("Unhandled system call\n");
     }

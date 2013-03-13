@@ -56,17 +56,15 @@ process_table_t process_table[PROCESS_MAX_PROCESSES];
 
 spinlock_t process_table_slock;
 
-void process_reset(process_id_t pid)
-{
-    process_table[pid].state         = PROCESS_FREE;
+void process_reset(process_id_t pid) {
+    process_table[pid].state = PROCESS_FREE;
     process_table[pid].executable[0] = 0;
-    process_table[pid].retval        = 0;
-    process_table[pid].cFiles        = 0;
+    process_table[pid].retval = 0;
+    process_table[pid].cFiles = 0;
 }
 
 /* Initialize process table and spinlock */
-void process_init()
-{
+void process_init() {
     int i;
     spinlock_reset(&process_table_slock);
     for (i = 0; i <= PROCESS_MAX_PROCESSES; ++i)
@@ -75,17 +73,14 @@ void process_init()
 
 /* Find a free slot in the process table. Returns PROCESS_MAX_PROCESSES
  * if the table is full. */
-process_id_t alloc_process_id()
-{
+process_id_t alloc_process_id() {
     int i;
     interrupt_status_t intr_status;
 
     intr_status = _interrupt_disable();
     spinlock_acquire(&process_table_slock);
-    for (i = 0; i <= PROCESS_MAX_PROCESSES; ++i)
-    {
-        if (process_table[i].state == PROCESS_FREE)
-        {
+    for (i = 0; i <= PROCESS_MAX_PROCESSES; ++i) {
+        if (process_table[i].state == PROCESS_FREE) {
             process_table[i].state = PROCESS_RUNNING;
             break;
         }
@@ -94,7 +89,6 @@ process_id_t alloc_process_id()
     _interrupt_set_state(intr_status);
     return i;
 }
-
 
 /**
  * Starts one userland process. The thread calling this function will
@@ -108,8 +102,7 @@ process_id_t alloc_process_id()
  * @executable The name of the executable to be run in the userland
  * process
  */
-void process_start(process_id_t pid)
-{
+void process_start(process_id_t pid) {
     thread_table_t *my_entry;
     pagetable_t *pagetable;
     uint32_t phys_page;
@@ -144,7 +137,7 @@ void process_start(process_id_t pid)
 
     _interrupt_set_state(intr_status);
 
-    file = vfs_open((char *)executable);
+    file = vfs_open((char *) executable);
     /* Make sure the file existed and was a valid ELF file */
     KERNEL_ASSERT(file >= 0);
     KERNEL_ASSERT(elf_parse_header(&elf, file));
@@ -159,7 +152,7 @@ void process_start(process_id_t pid)
             <= _tlb_get_maxindex() + 1);
 
     /* Allocate and map stack */
-    for(i = 0; i < CONFIG_USERLAND_STACK_SIZE; i++) {
+    for (i = 0; i < CONFIG_USERLAND_STACK_SIZE; i++) {
         phys_page = pagepool_get_phys_page();
         KERNEL_ASSERT(phys_page != 0);
         vm_map(my_entry->pagetable, phys_page,
@@ -178,14 +171,14 @@ void process_start(process_id_t pid)
     /* Allocate and map pages for the segments. We assume that
        segments begin at page boundary. (The linker script in tests
        directory creates this kind of segments) */
-    for(i = 0; i < (int)elf.ro_pages; i++) {
+    for (i = 0; i < (int) elf.ro_pages; i++) {
         phys_page = pagepool_get_phys_page();
         KERNEL_ASSERT(phys_page != 0);
         vm_map(my_entry->pagetable, phys_page,
                 elf.ro_vaddr + i*PAGE_SIZE, 1);
     }
 
-    for(i = 0; i < (int)elf.rw_pages; i++) {
+    for (i = 0; i < (int) elf.rw_pages; i++) {
         phys_page = pagepool_get_phys_page();
         KERNEL_ASSERT(phys_page != 0);
         vm_map(my_entry->pagetable, phys_page,
@@ -193,7 +186,7 @@ void process_start(process_id_t pid)
     }
 
     /* Initialize heap pointer */
-    uint32_t heap_end = elf.rw_vaddr+elf.rw_size;
+    uint32_t heap_end = elf.rw_vaddr + elf.rw_size;
     process_table[pid].heap_end = heap_end;
     if (heap_end % PAGE_SIZE == 0) {
         /* In the unlikely event that the heap should start on the 
@@ -204,12 +197,12 @@ void process_start(process_id_t pid)
     }
 
     /* Zero the pages. */
-    memoryset((void *)elf.ro_vaddr, 0, elf.ro_pages*PAGE_SIZE);
-    memoryset((void *)elf.rw_vaddr, 0, elf.rw_pages*PAGE_SIZE);
+    memoryset((void *) elf.ro_vaddr, 0, elf.ro_pages * PAGE_SIZE);
+    memoryset((void *) elf.rw_vaddr, 0, elf.rw_pages * PAGE_SIZE);
 
     stack_bottom = (USERLAND_STACK_TOP & PAGE_SIZE_MASK) -
-        (CONFIG_USERLAND_STACK_SIZE-1)*PAGE_SIZE;
-    memoryset((void *)stack_bottom, 0, CONFIG_USERLAND_STACK_SIZE*PAGE_SIZE);
+            (CONFIG_USERLAND_STACK_SIZE - 1) * PAGE_SIZE;
+    memoryset((void *) stack_bottom, 0, CONFIG_USERLAND_STACK_SIZE * PAGE_SIZE);
 
     /* Copy segments */
 
@@ -217,21 +210,21 @@ void process_start(process_id_t pid)
         /* Make sure that the segment is in proper place. */
         KERNEL_ASSERT(elf.ro_vaddr >= PAGE_SIZE);
         KERNEL_ASSERT(vfs_seek(file, elf.ro_location) == VFS_OK);
-        KERNEL_ASSERT(vfs_read(file, (void *)elf.ro_vaddr, elf.ro_size)
-                == (int)elf.ro_size);
+        KERNEL_ASSERT(vfs_read(file, (void *) elf.ro_vaddr, elf.ro_size)
+                == (int) elf.ro_size);
     }
 
     if (elf.rw_size > 0) {
         /* Make sure that the segment is in proper place. */
         KERNEL_ASSERT(elf.rw_vaddr >= PAGE_SIZE);
         KERNEL_ASSERT(vfs_seek(file, elf.rw_location) == VFS_OK);
-        KERNEL_ASSERT(vfs_read(file, (void *)elf.rw_vaddr, elf.rw_size)
-                == (int)elf.rw_size);
+        KERNEL_ASSERT(vfs_read(file, (void *) elf.rw_vaddr, elf.rw_size)
+                == (int) elf.rw_size);
     }
 
 
     /* Set the dirty bit to zero (read-only) on read-only pages. */
-    for(i = 0; i < (int)elf.ro_pages; i++) {
+    for (i = 0; i < (int) elf.ro_pages; i++) {
         vm_set_dirty(my_entry->pagetable, elf.ro_vaddr + i*PAGE_SIZE, 0);
     }
 
@@ -243,7 +236,7 @@ void process_start(process_id_t pid)
 
     /* Initialize the user context. (Status register is handled by
        thread_goto_userland) */
-    memoryset(&user_context, 0, sizeof(user_context));
+    memoryset(&user_context, 0, sizeof (user_context));
     user_context.cpu_regs[MIPS_REGISTER_SP] = USERLAND_STACK_TOP;
     user_context.pc = elf.entry_point;
 
@@ -252,8 +245,7 @@ void process_start(process_id_t pid)
     KERNEL_PANIC("thread_goto_userland failed.");
 }
 
-process_id_t process_spawn(const char *executable)
-{
+process_id_t process_spawn(const char *executable) {
     TID_t thread;
     process_id_t pid = alloc_process_id();
 
@@ -269,18 +261,15 @@ process_id_t process_spawn(const char *executable)
     return pid;
 }
 
-process_id_t process_get_current_process(void)
-{
+process_id_t process_get_current_process(void) {
     return thread_get_current_thread_entry()->process_id;
 }
 
-process_table_t *process_get_current_process_entry(void)
-{
+process_table_t *process_get_current_process_entry(void) {
     return &process_table[process_get_current_process()];
 }
 
-int process_join(process_id_t pid)
-{
+int process_join(process_id_t pid) {
     int retval;
     interrupt_status_t intr_status;
 
@@ -293,8 +282,7 @@ int process_join(process_id_t pid)
     spinlock_acquire(&process_table_slock);
 
     /* The thread could be zombie even though it wakes us (maybe). */
-    while (process_table[pid].state != PROCESS_ZOMBIE)
-    {
+    while (process_table[pid].state != PROCESS_ZOMBIE) {
         sleepq_add(&process_table[pid]);
         spinlock_release(&process_table_slock);
         thread_switch();
@@ -309,8 +297,7 @@ int process_join(process_id_t pid)
     return retval;
 }
 
-void process_finish(int retval)
-{
+void process_finish(int retval) {
     interrupt_status_t intr_status;
     process_id_t cur = process_get_current_process();
     thread_table_t *thread = thread_get_current_thread_entry();
@@ -318,7 +305,7 @@ void process_finish(int retval)
     intr_status = _interrupt_disable();
     spinlock_acquire(&process_table_slock);
 
-    process_table[cur].state  = PROCESS_ZOMBIE;
+    process_table[cur].state = PROCESS_ZOMBIE;
     process_table[cur].retval = retval;
 
     /* Remember to destroy the pagetable! */
@@ -332,25 +319,44 @@ void process_finish(int retval)
     thread_finish();
 }
 
-int process_add_file(openfile_t fd)
-{
-  fd = fd;
-  KERNEL_PANIC("Not implemented.");
-  return 0; /* Dummy */
+int process_add_file(openfile_t fd) {
+    process_id_t cur = process_get_current_process();
+    int i;
+    
+    for (i = 0; i < PROCESS_MAX_FILES; i++) {
+        if (process_table[cur].files[i] != NULL) {
+            process_table[cur].files[i] = fd;
+            return 0;
+        }
+    }
+    
+    return -1;
 }
 
-int process_rem_file(openfile_t fd)
-{
-  fd = fd;
-  KERNEL_PANIC("Not implemented.");
-  return 0; /* Dummy */
+int process_rem_file(openfile_t fd) {
+    process_id_t cur = process_get_current_process();
+    int i;
+    
+    for (i = 0; i < PROCESS_MAX_FILES; i++) {
+        if (process_table[cur].files[i] == fd) {
+            process_table[cur].files[i] = NULL;
+            return 0;
+        }
+    }
+    
+    return -1;
 }
 
-int process_check_file(openfile_t fd)
-{
-  fd = fd;
-  KERNEL_PANIC("Not implemented.");
-  return 0; /* Dummy */
+int process_check_file(openfile_t fd) {
+    process_id_t cur = process_get_current_process();
+    int i;
+    
+    for (i = 0; i < PROCESS_MAX_FILES; i++) {
+        if (process_table[cur].files[i] == fd) {
+            return 0;
+        }
+    }
+    return -1;
 }
 
 /** @} */
